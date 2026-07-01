@@ -1,0 +1,16 @@
+certifi==2026.6.17
+charset-normalizer==3.4.7
+idna==3.18
+neo4j==6.2.0
+numpy==2.5.0
+packaging==26.0
+pandas==3.0.3
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+pytz==2026.2
+requests==2.34.2
+setuptools==82.0.1
+six==1.17.0
+tqdm==4.68.3
+urllib3==2.7.0
+wheel==0.47.0

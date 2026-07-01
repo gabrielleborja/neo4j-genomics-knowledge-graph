@@ -1,0 +1,52 @@
+services:
+  neo4j:
+    image: neo4j:5.26
+    container_name: genome-graph-neo4j
+    restart: unless-stopped
+
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
+
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+      - ./data/import:/import
+
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER} -p ${NEO4J_PASSWORD} 'RETURN 1;'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+
+    container_name: genome-graph-etl
+
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+
+    volumes:
+      - ./scripts:/app/scripts
+      - ./neo4j:/app/neo4j
+      - ./data:/app/data
+
+    command: ["python", "scripts/init_constrains.py"]
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
