@@ -1,7 +1,9 @@
+import csv
 import os
 import time
-import requests
+from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
@@ -14,6 +16,34 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 BASE_URL = os.getenv("BASE_URL")
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = BASE_DIR / "data" / "import"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+GENE_DISEASE_CSV = DATA_DIR / "gene_disease.csv"
+
+CSV_FIELDS = [
+    "symbolOfGene",
+    "geneNcbiID",
+    "geneNcbiType",
+    "diseaseUMLSCUI",
+    "diseaseName",
+    "diseaseType",
+    "disease_inheritance",
+    "disease_prevalence_class",
+    "disease_prevalence_geo_area",
+    "disease_prevalence_type",
+    "assocID",
+    "score",
+    "normalized_score",
+    "ei",
+    "el",
+    "numPMIDs",
+    "yearInitial",
+    "yearFinal",
+    "source",
+]
 
 
 def chunk_list(items, chunk_size):
@@ -102,6 +132,68 @@ def filter_valid_associations(associations):
     return valid
 
 
+def load_existing_csv_keys():
+    """
+    Lê o CSV já existente para evitar salvar associações duplicadas.
+    A chave principal usada é assocID.
+    """
+    existing_keys = set()
+
+    if not GENE_DISEASE_CSV.exists():
+        return existing_keys
+
+    with open(GENE_DISEASE_CSV, "r", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+
+        for row in reader:
+            assoc_id = row.get("assocID")
+
+            if assoc_id:
+                existing_keys.add(assoc_id)
+
+    return existing_keys
+
+
+def save_associations_to_csv(associations):
+    """
+    Salva as associações válidas retornadas pela DisGeNET em um CSV persistente.
+    O arquivo é salvo em data/import/gene_disease.csv.
+    """
+    if not associations:
+        return 0
+
+    existing_keys = load_existing_csv_keys()
+    file_exists = GENE_DISEASE_CSV.exists()
+
+    saved = 0
+
+    with open(GENE_DISEASE_CSV, "a", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
+
+        if not file_exists:
+            writer.writeheader()
+
+        for assoc in associations:
+            assoc_id = assoc.get("assocID")
+
+            if assoc_id in existing_keys:
+                continue
+
+            row = {
+                field: assoc.get(field)
+                for field in CSV_FIELDS
+            }
+
+            row["source"] = "DisGeNET"
+
+            writer.writerow(row)
+
+            existing_keys.add(assoc_id)
+            saved += 1
+
+    return saved
+
+
 def save_associations_to_neo4j(driver, associations):
     query = """
     UNWIND $associations AS assoc
@@ -153,6 +245,7 @@ def main():
     # genes = genes[:20]
 
     imported = 0
+    saved_csv = 0
     failed_batches = 0
 
     for batch in chunk_list(genes, 10):
@@ -173,11 +266,14 @@ def main():
             if not valid_associations:
                 continue
 
+            saved_now = save_associations_to_csv(valid_associations)
             save_associations_to_neo4j(driver, valid_associations)
 
             imported += len(valid_associations)
+            saved_csv += saved_now
 
-            print(f"{len(valid_associations)} associações importadas.")
+            print(f"{saved_now} associações salvas no CSV.")
+            print(f"{len(valid_associations)} associações importadas no Neo4j.")
 
             time.sleep(1)
 
@@ -190,7 +286,9 @@ def main():
     print("\n==============================")
     print("Importação finalizada.")
     print(f"Genes considerados: {len(genes)}")
-    print(f"Associações importadas: {imported}")
+    print(f"Associações importadas no Neo4j: {imported}")
+    print(f"Associações novas salvas no CSV: {saved_csv}")
+    print(f"CSV gerado em: {GENE_DISEASE_CSV}")
     print(f"Lotes com erro: {failed_batches}")
 
 
